@@ -25,6 +25,7 @@ var LEADS_SHEET_NAME = 'LEADS AUDIO';
 //    Se envían desde la cuenta de Google que ejecuta este script; aquí solo
 //    se fija el nombre visible y a qué dirección llegan las respuestas.
 var SENDER_NAME = 'Marta Marina · Music Mind';
+var SENDER_EMAIL = 'marta.marina@musicmind.es'; // debe estar añadido como alias "Enviar como" en la cuenta que ejecuta el script
 var REPLY_TO = 'marta.marina@musicmind.es';
 var SITE_URL = 'https://www.musicmind.es/';
 
@@ -264,7 +265,7 @@ function emailLayout(o) {
 }
 
 function sendToSubscriber(to, subject, html) {
-  MailApp.sendEmail({ to: to, subject: subject, htmlBody: html, name: SENDER_NAME, replyTo: REPLY_TO });
+  GmailApp.sendEmail(to, subject, 'Abre este email en un cliente que muestre HTML.', { htmlBody: html, name: SENDER_NAME, from: SENDER_EMAIL, replyTo: REPLY_TO });
 }
 
 // Aviso interno (para ti y Marta)
@@ -316,7 +317,7 @@ function json(obj) {
   PREVIEW_TO cómo se ven los emails de bienvenida y del kit. */
 var PREVIEW_TO = 'maxim@hipeagency.es';
 function previewEmails() {
-  MailApp.sendEmail({ to: PREVIEW_TO, subject: '[PRUEBA] Bienvenida', htmlBody: welcomeHtml(), name: SENDER_NAME, replyTo: REPLY_TO });
+  GmailApp.sendEmail(PREVIEW_TO, '[PRUEBA] Bienvenida', 'HTML', { htmlBody: welcomeHtml(), name: SENDER_NAME, from: SENDER_EMAIL, replyTo: REPLY_TO });
   var key = Object.keys(LEAD_MAGNETS)[0];
-  MailApp.sendEmail({ to: PREVIEW_TO, subject: '[PRUEBA] Audio landing', htmlBody: leadHtml(LEAD_MAGNETS[key]), name: SENDER_NAME, replyTo: REPLY_TO });
+  GmailApp.sendEmail(PREVIEW_TO, '[PRUEBA] Audio landing', 'HTML', { htmlBody: leadHtml(LEAD_MAGNETS[key]), name: SENDER_NAME, from: SENDER_EMAIL, replyTo: REPLY_TO });
 }
