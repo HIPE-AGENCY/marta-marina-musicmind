@@ -177,6 +177,11 @@
               <span class="check__box" aria-hidden="true"></span>
               <span class="check__text">He leído y acepto la <a class="link-underline" href="/#privacidad" target="_blank" rel="noopener">política de privacidad</a> y que se use mi email para enviarme estos audios.</span>
             </label>
+            <label class="check">
+              <input type="checkbox" id="lpNews" name="newsletter">
+              <span class="check__box" aria-hidden="true"></span>
+              <span class="check__text">Quiero recibir también la newsletter de Music Mind. Puedes darte de baja cuando quieras. <em>(Opcional)</em></span>
+            </label>
             <button type="submit" class="btn" id="lpBtn">Quiero mi kit <span class="arrow">→</span></button>
             <div class="lp-msg" id="lpMsg" role="status" aria-live="polite"></div>
           </form>
@@ -240,7 +245,8 @@
     btn.innerHTML = 'Enviando…';
     setMsg('', '');
 
-    var body = new URLSearchParams({ type: 'lead', magnet: MAGNET, email: v, consent: 'true', source: 'landing · ' + from });
+    var body = new URLSearchParams({ type: 'lead', magnet: MAGNET, email: v, consent: 'true',
+      newsletter: document.getElementById('lpNews').checked ? 'true' : 'false', source: 'landing · ' + from });
     fetch(ENDPOINT, { method: 'POST', body: body })
       .then(function (r) { return r.json(); })
       .then(function (res) {

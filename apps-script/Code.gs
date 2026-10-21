@@ -3,8 +3,12 @@
    Google Apps Script Web App
    ---------------------------------------------------------
    Qué hace:
-   - Newsletter (web): guarda el alta, envía el email de bienvenida
-     con los audios de regalo y te avisa por email.
+   - Newsletter (web): guarda el alta, le envía al momento el kit (dos
+     audios) y te avisa por email. A los WELCOME_DELAY_DAYS días recibe el
+     email de Marta con la infografía (sendPendingWelcomes, tarea diaria).
+   - Landing: si marca la casilla opcional, también queda suscrito a la
+     newsletter y recibe el email de Marta a los WELCOME_DELAY_DAYS días.
+   - En la hoja, casillas ✓ con lo que ha recibido cada suscriptor.
    - Contacto (web): guarda el mensaje y te avisa por email.
   - Lead (landing de audio): guarda el lead, le envía los audios
      por email y te avisa.
@@ -49,6 +53,20 @@ var KIT_AUDIOS = [
     downloadUrl: SITE_URL + 'audios/?audio=kit-emergencia#descargar'
   }
 ];
+// 5) Email de Marta con la infografía (segundo email de la newsletter).
+//    Si infographicUrl está vacía, no se envía (solo se registra).
+var WELCOME = {
+  subject: 'Un regalo para los primeros',
+  infographicUrl: SITE_URL + 'assets/descargas/10-habitos-bienestar-industria-musical.jpg',
+  kitUrl: SITE_URL + 'audios/'
+};
+// Llega WELCOME_DELAY_DAYS días después de suscribirse. No se envía nada antes
+// de WELCOME_START: ese día lo reciben de golpe todos los suscriptores que ya
+// existían (ver setupWelcomeTrigger).
+var WELCOME_DELAY_DAYS = 4;
+var WELCOME_START = '2026-10-24T17:00:00+02:00';   // viernes 24/10, 17:00 (Madrid)
+var WELCOME_HOUR = 17;                              // hora diaria de envío
+
 // Una entrada por landing. La clave es el MAGNET de la landing (kit-emergencia/index.html).
 var LEAD_MAGNETS = {
   'kit-emergencia': {
@@ -66,6 +84,7 @@ var CONSENT_VERSION = '2026-10-09';
 var CONSENT_TEXT_CONTACT = 'He leído y acepto la política de privacidad y el tratamiento de mis datos para responder a mi consulta.';
 var CONSENT_TEXT_NEWS = 'Acepto recibir la newsletter y la política de privacidad. Sin spam; puedes darte de baja cuando quieras.';
 var CONSENT_TEXT_LEAD = 'He leído y acepto la política de privacidad y que se use mi email para enviarme estos audios.';
+var CONSENT_TEXT_NEWS_LANDING = 'Quiero recibir también la newsletter de Music Mind. Puedes darte de baja cuando quieras.';
 
 function doPost(e) {
   try {
@@ -118,18 +137,21 @@ function handleContact(p, email, source, ts, consentCell) {
   return json({ result: 'success', message: 'Mensaje enviado.' });
 }
 
-// ---- Alta en la newsletter (web) + email de bienvenida con audio ----
-function handleNewsletter(email, source, ts, consentCell) {
-  var isNew = true;
-  if (SHEET_ID) {
-    var sheet = getSheet(SHEET_NAME, ['Fecha', 'Email', 'Origen', 'Consentimiento', 'Texto consentimiento']);
-    isNew = !emailExists(sheet, 2, email);
-    if (isNew) sheet.appendRow([ts, email, source, consentCell, CONSENT_TEXT_NEWS]);
-  }
+// ---- Alta en la newsletter (web) ----
+// Columnas F-I: registro de qué ha recibido cada suscriptor (casillas ✓ + fecha).
+var NEWS_COLS = ['Fecha', 'Email', 'Origen', 'Consentimiento', 'Texto consentimiento',
+  '1 · Kit enviado', '2 · Bienvenida enviada', 'Fecha kit', 'Fecha bienvenida'];
+var COL_KIT = 6, COL_WELCOME = 7, COL_KIT_DATE = 8, COL_WELCOME_DATE = 9;
 
-  // Bienvenida solo la primera vez, para no reenviarla si alguien se suscribe dos veces.
-  if (isNew && WELCOME_AUDIO.url) {
-    sendToSubscriber(email, 'Bienvenida a Music Mind · tu audio de regalo', welcomeHtml());
+function handleNewsletter(email, source, ts, consentCell) {
+  var row = addSubscriber(email, source, ts, consentCell, CONSENT_TEXT_NEWS);
+  var isNew = row !== 0;
+
+  // Kit (dos audios) al momento, solo la primera vez. El email de Marta con la
+  // infografía llega a los WELCOME_DELAY_DAYS días con sendPendingWelcomes().
+  if (isNew && KIT_AUDIOS.length) {
+    sendToSubscriber(email, 'Bienvenida a Music Mind · tu kit de emergencia', kitWelcomeHtml());
+    markSent(row, COL_KIT, COL_KIT_DATE);
   }
 
   MailApp.sendEmail({
@@ -137,11 +159,31 @@ function handleNewsletter(email, source, ts, consentCell) {
     subject: '✦ Nueva suscripción · Music Mind',
     htmlBody: notifyHtml('Nueva alta en la newsletter', [
       ['Email', email], ['Origen', source], ['Fecha', ts.toLocaleString()],
-      ['Ya estaba suscrito', isNew ? 'No' : 'Sí (no se reenvía la bienvenida)'],
+      ['Ya estaba suscrito', isNew ? 'No' : 'Sí (no se le reenvía nada)'],
       ['Consentimiento', consentCell + ' — «' + CONSENT_TEXT_NEWS + '»']
     ])
   });
   return json({ result: 'success', message: 'Suscripción registrada.' });
+}
+
+// Añade el email a la pestaña de newsletter si no estaba.
+// Devuelve el número de fila nueva, 0 si ya existía o -1 si no hay hoja.
+function addSubscriber(email, source, ts, consentCell, consentText) {
+  if (!SHEET_ID) return -1;
+  var sheet = getSheet(SHEET_NAME, NEWS_COLS);
+  if (emailExists(sheet, 2, email)) return 0;
+  sheet.appendRow([ts, email, source, consentCell, consentText]);
+  var row = sheet.getLastRow();
+  sheet.getRange(row, COL_KIT, 1, 2).insertCheckboxes();
+  return row;
+}
+
+// Marca la casilla de un envío (✓) y anota la fecha en la fila del suscriptor.
+function markSent(row, checkCol, dateCol) {
+  if (!SHEET_ID || row < 2) return;
+  var sheet = getSheet(SHEET_NAME, NEWS_COLS);
+  sheet.getRange(row, checkCol).setValue(true);
+  sheet.getRange(row, dateCol).setValue(new Date());
 }
 
 // ---- Lead desde una landing de audio ----
@@ -152,12 +194,22 @@ function handleLead(p, email, source, ts, consentCell) {
     return json({ result: 'error', message: 'Contenido no encontrado.' });
   }
   if (SHEET_ID) {
-    var sheet = getSheet(LEADS_SHEET_NAME, ['Fecha', 'Email', 'Audio', 'Origen', 'Consentimiento', 'Texto consentimiento']);
+    var sheet = getSheet(LEADS_SHEET_NAME, ['Fecha', 'Email', 'Audio', 'Origen', 'Consentimiento', 'Texto consentimiento', 'Audios enviados', 'Newsletter']);
     sheet.appendRow([ts, email, key, source, consentCell, CONSENT_TEXT_LEAD]);
+    // insertCheckboxes pone las casillas a «falso»; los valores se escriben después.
+    var cb = sheet.getRange(sheet.getLastRow(), 7, 1, 2);
+    cb.insertCheckboxes();
+    cb.setValues([[!!(magnet.audios && magnet.audios.length), String(p.newsletter || '') === 'true']]);
   }
+  // Casilla opcional de la landing: también se suscribe a la newsletter.
+  var wantsNews = String(p.newsletter || '') === 'true';
+  var subRow = wantsNews ? addSubscriber(email, source, ts, consentCell, CONSENT_TEXT_NEWS_LANDING) : 0;
+  var newSubscriber = subRow !== 0;
+
   // Se envía siempre (aunque repita): quien lo pide otra vez probablemente lo ha perdido.
   if (magnet.audios && magnet.audios.length) {
-    sendToSubscriber(email, magnet.title + ' · Music Mind', leadHtml(magnet));
+    sendToSubscriber(email, magnet.title + ' · Music Mind', leadHtml(magnet, wantsNews));
+    if (newSubscriber && key === 'kit-emergencia') markSent(subRow, COL_KIT, COL_KIT_DATE);
   }
   MailApp.sendEmail({
     to: NOTIFY_EMAIL,
@@ -165,7 +217,8 @@ function handleLead(p, email, source, ts, consentCell) {
     htmlBody: notifyHtml('Nuevo lead desde la landing', [
       ['Email', email], ['Audio', key + ' · ' + magnet.title], ['Origen', source],
       ['Fecha', ts.toLocaleString()],
-      ['Consentimiento', consentCell + ' — «' + CONSENT_TEXT_LEAD + '»']
+      ['Consentimiento', consentCell + ' — «' + CONSENT_TEXT_LEAD + '»'],
+      ['Newsletter', wantsNews ? (newSubscriber ? 'Sí, nueva suscripción' : 'Sí (ya estaba suscrito)') : 'No']
     ])
   });
   return json({ result: 'success', message: 'Audios enviados.' });
@@ -180,7 +233,8 @@ function doGet() {
    HTML con tablas y estilos en línea: es lo que mejor se ve en Gmail,
    Outlook y Apple Mail. Los textos entre [corchetes] son PLACEHOLDER. */
 
-function welcomeHtml() {
+// Primer email de la newsletter (al momento): el kit con los dos audios.
+function kitWelcomeHtml() {
   return emailLayout({
     preheader: 'Gracias por unirte. Aquí tienes dos pausas guiadas para tener cerca.',
     eyebrow: 'Bienvenida',
@@ -193,11 +247,38 @@ function welcomeHtml() {
     ],
     audioLinks: KIT_AUDIOS,
     closing: 'Un abrazo,<br>Marta',
-    footer: 'Recibes este email porque te has suscrito a la newsletter de Music Mind en musicmind.es. Si no quieres recibir más emails, responde a este correo con la palabra «BAJA» y te daré de baja.'
+    footer: NEWS_FOOTER
   });
 }
 
-function leadHtml(magnet) {
+// Segundo email de la newsletter (a los WELCOME_DELAY_DAYS días): texto de Marta
+// con la infografía. Octubre 2026.
+function welcomeHtml() {
+  return emailLayout({
+    preheader: 'Además del Kit de Emergencia, te mando 10 hábitos para tu bienestar en la industria musical.',
+    eyebrow: 'Bienvenida',
+    title: 'Un regalo <em>para los primeros.</em>',
+    paragraphs: [
+      'Hola,',
+      'Llevo más o menos 7 años en un camino de autoconocimiento que no sé muy bien dónde me va a llevar, pero que ha cambiado por completo mi vida.',
+      'Antes de 2019 era una chica con muchos miedos (algunos todavía salen de vez en cuando), muy complaciente, que intentaba eludir cualquier conflicto y alardeaba de tener un don: el poder adaptarme a cualquier persona, grupo o situación. Años más tarde entendí que esto no es un don, sino un síntoma de no saber quién eres y de no ser fiel a tus principios.',
+      'Si me dicen que 7 años más tarde iba a estar escribiéndote un primer mail de bienvenida desde mi web… Mi web. Que todavía no me lo creo, en serio.',
+      'Las cosas han ido pasando poco a poco, no por arte de magia, sino con mucha consciencia y trabajo interno. He ido construyendo a la persona que siempre he querido ser bajo una regla fundamental para mí: la <b>COHERENCIA</b>. Ser coherente me proporciona paz, bienestar y una sensación de plenitud. Y dado que a mí me ha funcionado, quiero compartirlo con todos.',
+      'Emprender no es fácil. Vas contracorriente de muchas cosas que damos por normales — la disponibilidad permanente, el ritmo sin pausa, el «aguanta, que esto es así». Y a veces eso genera una ansiedad que no sabes muy bien de dónde viene.',
+      'Pero cuando pienso en lo que puedo aportar a las personas que trabajan en esta industria, se me van todos los pensamientos de incertidumbre. Todos.',
+      'Por eso hoy quiero darte algo más.',
+      'Además del <a href="' + WELCOME.kitUrl + '" style="color:#2F4A55">Kit de Emergencia</a> (dos pausas guiadas para volver a ti), te mando una infografía con <b>10 hábitos para tu bienestar en la industria musical</b>. Los he elegido porque son los que a mí me han funcionado, y porque creo que marcan la diferencia entre sobrevivir un día o vivirlo de verdad.',
+      'El primero de todos — y el más importante — tiene que ver con cómo te hablas a ti mismo. Porque lo que depende de ti, solo depende de ti. Y cuando eso está en orden, todo lo que viene de fuera, lo que no puedes controlar, lo enfrentas de una manera completamente diferente.'
+    ],
+    button: { text: '👉 Descarga aquí tu infografía', url: WELCOME.infographicUrl },
+    closing: 'Gracias por estar aquí desde el principio.<br><br>Marta Marina',
+    footer: NEWS_FOOTER
+  });
+}
+
+var NEWS_FOOTER = 'Recibes este email porque te has suscrito a la newsletter de Music Mind en musicmind.es. Si no quieres recibir más emails, responde a este correo con la palabra «BAJA» y te daré de baja.';
+
+function leadHtml(magnet, subscribed) {
   return emailLayout({
     preheader: 'Dos pausas guiadas para cuando la presión de la industria musical aprieta.',
     eyebrow: 'Tu kit de emergencia',
@@ -210,7 +291,8 @@ function leadHtml(magnet) {
     ],
     audioLinks: magnet.audios,
     closing: 'Un abrazo,<br>Marta',
-    footer: 'Recibes este email porque lo has solicitado en musicmind.es. No te hemos suscrito a ninguna lista: solo te enviamos estos audios.'
+    footer: subscribed ? NEWS_FOOTER
+      : 'Recibes este email porque lo has solicitado en musicmind.es. No te hemos suscrito a ninguna lista: solo te enviamos estos audios.'
   });
 }
 
@@ -253,6 +335,9 @@ function emailLayout(o) {
           '<h1 style="margin:0 0 24px;font-family:' + serif + ';font-weight:400;font-size:32px;line-height:1.15;color:' + ink + '">' + title + '</h1>' +
           paras +
           audioLinks +
+          (o.button ? '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:28px 0"><tr><td style="background:' + ink + ';border-radius:100px">' +
+            '<a href="' + o.button.url + '" style="display:inline-block;padding:14px 28px;font-family:' + sans + ';font-size:15px;font-weight:500;color:#ffffff;text-decoration:none">' + o.button.text + '</a>' +
+          '</td></tr></table>' : '') +
           '<p style="margin:0;font-family:' + sans + ';font-size:16px;line-height:1.6;color:' + ink + '">' + o.closing + '</p>' +
         '</td></tr>' +
         '<tr><td style="padding:24px 12px 0;font-family:' + sans + ';font-size:12px;line-height:1.6;color:' + muted + ';text-align:center">' +
@@ -312,12 +397,63 @@ function json(obj) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
+/* ---------- Email de Marta (infografía), con retraso ----------
+   Se ejecuta cada día a WELCOME_HOUR (ver setupWelcomeTrigger). Envía el email
+   de Marta a cada suscriptor que lleve WELCOME_DELAY_DAYS días o más y aún no
+   lo haya recibido (casilla «2 · Bienvenida enviada» sin marcar), y la marca.
+   Antes de WELCOME_START no hace nada; ese día lo reciben todos los que ya
+   estaban suscritos. Se salta los emails de prueba (@example.com). Si se agota
+   la cuota diaria, el resto sale al día siguiente. */
+function sendPendingWelcomes() {
+  var now = new Date();
+  if (now < new Date(WELCOME_START) || !WELCOME.infographicUrl) return;
+  var sheet = getSheet(SHEET_NAME, NEWS_COLS);
+  var last = sheet.getLastRow();
+  if (last < 2) return;
+  var cutoff = new Date(now.getTime() - WELCOME_DELAY_DAYS * 24 * 3600 * 1000);
+  var rows = sheet.getRange(2, 1, last - 1, COL_WELCOME).getValues();
+  var sent = 0, pending = 0;
+  for (var i = 0; i < rows.length; i++) {
+    // Filas antiguas sin casillas: se crean aquí. (insertCheckboxes las pone a
+    // «falso», por eso solo se aplica a filas que aún no tienen ninguna marca.)
+    if (typeof rows[i][COL_KIT - 1] !== 'boolean') sheet.getRange(i + 2, COL_KIT, 1, 2).insertCheckboxes();
+    var signedUp = new Date(rows[i][0]), email = String(rows[i][1]).trim();
+    if (rows[i][COL_WELCOME - 1] === true || !isValidEmail(email) || /@example\.com$/i.test(email)) continue;
+    // Fecha ilegible (escrita a mano, vacía…) → se trata como reciente: mejor esperar que enviar antes de tiempo.
+    if (isNaN(signedUp.getTime()) || signedUp > cutoff) { pending++; continue; }
+    if (MailApp.getRemainingDailyQuota() < 2) { pending++; continue; }
+    sendToSubscriber(email, WELCOME.subject, welcomeHtml());
+    markSent(i + 2, COL_WELCOME, COL_WELCOME_DATE);
+    sent++;
+  }
+  if (sent) {
+    MailApp.sendEmail({
+      to: NOTIFY_EMAIL,
+      subject: '✦ Bienvenida enviada · Music Mind',
+      htmlBody: notifyHtml('Email de Marta (infografía) enviado', [
+        ['Enviados hoy', String(sent)], ['Pendientes para próximos días', String(pending)]
+      ])
+    });
+  }
+}
+
+// Ejecutar UNA vez desde el editor: crea la tarea diaria de sendPendingWelcomes().
+function setupWelcomeTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'sendPendingWelcomes') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('sendPendingWelcomes').timeBased().everyDays(1).atHour(WELCOME_HOUR).create();
+  Logger.log('Tarea diaria creada (' + WELCOME_HOUR + ':00). Primer envío a partir de ' + WELCOME_START);
+}
+
 /* ---------- Previsualizar emails ----------
    Ejecuta esta función desde el editor (▶ Ejecutar) para recibir en
-  PREVIEW_TO cómo se ven los emails de bienvenida y del kit. */
+  PREVIEW_TO los tres emails: kit al suscribirse, email de Marta con la
+  infografía y kit desde la landing. */
 var PREVIEW_TO = 'maxim@hipeagency.es';
 function previewEmails() {
-  GmailApp.sendEmail(PREVIEW_TO, '[PRUEBA] Bienvenida', 'HTML', { htmlBody: welcomeHtml(), name: SENDER_NAME, from: SENDER_EMAIL, replyTo: REPLY_TO });
-  var key = Object.keys(LEAD_MAGNETS)[0];
-  GmailApp.sendEmail(PREVIEW_TO, '[PRUEBA] Audio landing', 'HTML', { htmlBody: leadHtml(LEAD_MAGNETS[key]), name: SENDER_NAME, from: SENDER_EMAIL, replyTo: REPLY_TO });
+  var opts = function (html) { return { htmlBody: html, name: SENDER_NAME, from: SENDER_EMAIL, replyTo: REPLY_TO }; };
+  GmailApp.sendEmail(PREVIEW_TO, '[PRUEBA 1] Kit al suscribirse', 'HTML', opts(kitWelcomeHtml()));
+  GmailApp.sendEmail(PREVIEW_TO, '[PRUEBA 2] ' + WELCOME.subject, 'HTML', opts(welcomeHtml()));
+  GmailApp.sendEmail(PREVIEW_TO, '[PRUEBA 3] Kit desde la landing', 'HTML', opts(leadHtml(LEAD_MAGNETS['kit-emergencia'], false)));
 }
