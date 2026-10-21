@@ -270,7 +270,7 @@ function welcomeHtml() {
       'Además del <a href="' + WELCOME.kitUrl + '" style="color:#2F4A55">Kit de Emergencia</a> (dos pausas guiadas para volver a ti), te mando una infografía con <b>10 hábitos para tu bienestar en la industria musical</b>. Los he elegido porque son los que a mí me han funcionado, y porque creo que marcan la diferencia entre sobrevivir un día o vivirlo de verdad.',
       'El primero de todos — y el más importante — tiene que ver con cómo te hablas a ti mismo. Porque lo que depende de ti, solo depende de ti. Y cuando eso está en orden, todo lo que viene de fuera, lo que no puedes controlar, lo enfrentas de una manera completamente diferente.'
     ],
-    button: { text: '👉 Descarga aquí tu infografía', url: WELCOME.infographicUrl },
+    button: { text: '&#128073;&nbsp; Descarga aquí tu infografía', url: WELCOME.infographicUrl },
     closing: 'Gracias por estar aquí desde el principio.<br><br>Marta Marina',
     footer: NEWS_FOOTER
   });
