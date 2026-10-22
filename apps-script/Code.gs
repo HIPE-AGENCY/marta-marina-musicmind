@@ -13,6 +13,9 @@
   - Lead (landing de audio): guarda el lead, le envía los audios
      por email y te avisa.
    - En todos los casos registra el consentimiento (RGPD).
+   - sendContactInvites(): invitación personal, una sola vez, a contactos de
+     la agenda de Marta (INVITES). NO los suscribe: solo entran en la
+     newsletter si se apuntan ellos desde la web.
    ========================================================= */
 
 // ====== CONFIGURA ESTO ======================================
@@ -66,6 +69,27 @@ var WELCOME = {
 var WELCOME_DELAY_DAYS = 4;
 var WELCOME_START = '2026-10-24T17:00:00+02:00';   // viernes 24/10, 17:00 (Madrid)
 var WELCOME_HOUR = 17;                              // hora diaria de envío
+
+// 6) Invitación personal a contactos de la agenda de Marta (sendContactInvites).
+//    Un email por persona, una sola vez. Nombre vacío → saluda con «Hola:».
+var INVITE_SUBJECT = 'Un pequeño regalo de mi parte';
+var INVITES_SHEET_NAME = 'INVITACIONES';
+var INVITES = [
+  ['samayax.ss@gmail.com', ''],
+  ['mlramal@pons.es', ''],
+  ['psicoterapiacrea@gmail.com', ''],
+  ['alicia.arauzo.contacto@gmail.com', 'Alicia'],
+  ['clarahachemusic@gmail.com', 'Clara'],
+  ['olga@olgadepalma.com', 'Olga'],
+  ['irigoyen.celia@gmail.com', 'Celia'],
+  ['toboso.alicia@gmail.com', 'Alicia'],
+  ['reinadepikas50@gmail.com', ''],
+  ['marta.sanchez.ba@gmail.com', 'Marta'],
+  ['maricruzdicarlo@gmail.com', 'Maricruz'],
+  ['paulagalindovalle@gmail.com', 'Paula'],
+  ['saramenach@gmail.com', 'Sara'],
+  ['gemajy@gmail.com', '']
+];
 
 // Una entrada por landing. La clave es el MAGNET de la landing (kit-emergencia/index.html).
 var LEAD_MAGNETS = {
@@ -296,6 +320,28 @@ function leadHtml(magnet, subscribed) {
   });
 }
 
+// Invitación personal a contactos de la agenda (no suscriptores).
+function inviteHtml(name) {
+  return emailLayout({
+    preheader: 'He empezado un proyecto muy especial para mí y quería contártelo.',
+    eyebrow: 'De Marta, para ti',
+    title: 'Un pequeño regalo <em>de mi parte.</em>',
+    paragraphs: [
+      (name ? 'Hola, ' + escapeHtml(name) + ':' : 'Hola:'),
+      'Te escribo porque te tengo en mi agenda y quería contarte, por si no lo sabías, que he empezado un proyecto muy especial para mí: <b>Music Mind</b>, un espacio de comunicación consciente y bienestar emocional para las personas que trabajamos en la industria musical.',
+      'Si te apetece ver un poco de qué va, aquí tienes mi web: <a href="' + SITE_URL + '" style="color:#2F4A55">musicmind.es</a>.',
+      'Y como ya formas parte de mi comunidad, te dejo un pequeño obsequio: mi kit de emergencia, dos pausas guiadas para volver a ti, y una <a href="' + WELCOME.infographicUrl + '" style="color:#2F4A55">infografía con 10 hábitos para tu bienestar en la industria musical</a>.'
+    ],
+    audioLinks: KIT_AUDIOS,
+    afterAudio: [
+      'Si te interesa estar al corriente de todas las novedades, puedes suscribirte a mi newsletter. Solo te llegará si te apuntas tú.'
+    ],
+    button: { text: 'Suscribirme a la newsletter', url: SITE_URL + '#newsletter' },
+    closing: 'Muchas gracias por tu tiempo.<br><br>Un abrazo,<br>Marta',
+    footer: 'Te escribo personalmente porque estás en mi agenda de contactos. No te he añadido a ninguna lista: solo recibirás la newsletter si te suscribes.'
+  });
+}
+
 function emailLayout(o) {
   var ink = '#2F4A55', muted = '#4C6672', accent = '#5E7A87', bg = '#F1EAE1', surface = '#FBF7F1';
   var serif = "Georgia,'Times New Roman',serif", sans = "'Helvetica Neue',Helvetica,Arial,sans-serif";
@@ -335,6 +381,9 @@ function emailLayout(o) {
           '<h1 style="margin:0 0 24px;font-family:' + serif + ';font-weight:400;font-size:32px;line-height:1.15;color:' + ink + '">' + title + '</h1>' +
           paras +
           audioLinks +
+          (o.afterAudio || []).map(function (t) {
+            return '<p style="margin:0 0 16px;font-family:' + sans + ';font-size:16px;line-height:1.6;color:' + muted + '">' + t + '</p>';
+          }).join('') +
           (o.button ? '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:28px 0"><tr><td style="background:' + ink + ';border-radius:100px">' +
             '<a href="' + o.button.url + '" style="display:inline-block;padding:14px 28px;font-family:' + sans + ';font-size:15px;font-weight:500;color:#ffffff;text-decoration:none">' + o.button.text + '</a>' +
           '</td></tr></table>' : '') +
@@ -446,6 +495,38 @@ function setupWelcomeTrigger() {
   Logger.log('Tarea diaria creada (' + WELCOME_HOUR + ':00). Primer envío a partir de ' + WELCOME_START);
 }
 
+/* ---------- Invitación a contactos de la agenda ----------
+   Ejecutar a mano desde el editor. Envía inviteHtml() a cada contacto de
+   INVITES una sola vez y lo apunta en la pestaña INVITACIONES. Se salta a
+   quien ya la recibió o ya está suscrito a la newsletter. Se puede volver a
+   ejecutar sin riesgo: solo envía a los que falten. */
+function sendContactInvites() {
+  var log = getSheet(INVITES_SHEET_NAME, ['Fecha', 'Email', 'Nombre', 'Invitación enviada', '¿Se ha suscrito?']);
+  var subs = getSheet(SHEET_NAME, NEWS_COLS);
+  var sent = 0, skipped = [];
+  INVITES.forEach(function (c) {
+    var email = String(c[0]).trim().toLowerCase(), name = String(c[1] || '').trim();
+    if (!isValidEmail(email)) { skipped.push(email + ' (email no válido)'); return; }
+    if (emailExists(log, 2, email)) { skipped.push(email + ' (ya invitado)'); return; }
+    if (emailExists(subs, 2, email)) { skipped.push(email + ' (ya suscrito)'); return; }
+    if (MailApp.getRemainingDailyQuota() < 2) { skipped.push(email + ' (cuota diaria agotada: vuelve a ejecutar mañana)'); return; }
+    sendToSubscriber(email, INVITE_SUBJECT, inviteHtml(name));
+    log.appendRow([new Date(), email, name]);
+    var cb = log.getRange(log.getLastRow(), 4, 1, 2);
+    cb.insertCheckboxes();
+    cb.setValues([[true, false]]);
+    sent++;
+  });
+  Logger.log('Invitaciones enviadas: ' + sent + (skipped.length ? '\nSaltadas:\n' + skipped.join('\n') : ''));
+  MailApp.sendEmail({
+    to: NOTIFY_EMAIL,
+    subject: '✉ Invitaciones enviadas · Music Mind',
+    htmlBody: notifyHtml('Invitación a contactos de la agenda', [
+      ['Enviadas', String(sent)], ['Saltadas', skipped.length ? skipped.join('\n') : 'Ninguna']
+    ])
+  });
+}
+
 /* ---------- Previsualizar emails ----------
    Ejecuta esta función desde el editor (▶ Ejecutar) para recibir en
   PREVIEW_TO los tres emails: kit al suscribirse, email de Marta con la
@@ -456,4 +537,10 @@ function previewEmails() {
   GmailApp.sendEmail(PREVIEW_TO, '[PRUEBA 1] Kit al suscribirse', 'HTML', opts(kitWelcomeHtml()));
   GmailApp.sendEmail(PREVIEW_TO, '[PRUEBA 2] ' + WELCOME.subject, 'HTML', opts(welcomeHtml()));
   GmailApp.sendEmail(PREVIEW_TO, '[PRUEBA 3] Kit desde la landing', 'HTML', opts(leadHtml(LEAD_MAGNETS['kit-emergencia'], false)));
+}
+
+// Solo la invitación a contactos, con un nombre de ejemplo.
+function previewInvite() {
+  GmailApp.sendEmail(PREVIEW_TO, '[PRUEBA] ' + INVITE_SUBJECT, 'HTML',
+    { htmlBody: inviteHtml('Olga'), name: SENDER_NAME, from: SENDER_EMAIL, replyTo: REPLY_TO });
 }
