@@ -67,7 +67,7 @@ var WELCOME = {
 // de WELCOME_START: ese día lo reciben de golpe todos los suscriptores que ya
 // existían (ver setupWelcomeTrigger).
 var WELCOME_DELAY_DAYS = 4;
-var WELCOME_START = '2026-10-24T17:00:00+02:00';   // viernes 24/10, 17:00 (Madrid)
+var WELCOME_START = '2026-10-23T17:00:00+02:00';   // viernes 23/10, 17:00 (Madrid)
 var WELCOME_HOUR = 17;                              // hora diaria de envío
 
 // 6) Invitación personal a contactos de la agenda de Marta (sendContactInvites).
