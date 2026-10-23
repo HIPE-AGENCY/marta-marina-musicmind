@@ -91,6 +91,12 @@ var INVITES = [
   ['gemajy@gmail.com', '']
 ];
 
+// 7) Seguimiento a quien pidió el kit en la landing sin suscribirse (sendKitFollowUps).
+//    Un solo email por persona, pasados FOLLOWUP_DELAY_DAYS días desde que lo pidió.
+var FOLLOWUP_SUBJECT = '¿Qué tal el kit de emergencia?';
+var FOLLOWUP_SHEET_NAME = 'SEGUIMIENTO KIT';
+var FOLLOWUP_DELAY_DAYS = 2;
+
 // Una entrada por landing. La clave es el MAGNET de la landing (kit-emergencia/index.html).
 var LEAD_MAGNETS = {
   'kit-emergencia': {
@@ -342,6 +348,24 @@ function inviteHtml(name) {
   });
 }
 
+// Seguimiento personal a quien pidió el kit y no se suscribió (una sola vez).
+function kitFollowUpHtml() {
+  return emailLayout({
+    preheader: 'Quería saber si has podido escuchar los audios, y contarte algo más.',
+    eyebrow: 'De Marta, para ti',
+    title: '¿Has podido <em>escucharlo?</em>',
+    paragraphs: [
+      'Hola:',
+      'Hace unos días te mandé mi kit de emergencia y quería saber qué tal te ha ido. ¿Has podido escuchar los audios? ¿Te han servido?',
+      'Si te apetece, respóndeme a este email y cuéntame. Me ayuda muchísimo saber qué funciona y qué no, y los leo todos.',
+      'Por si te interesa seguir cerca, comparto recursos gratuitos como estos con quienes se apuntan a mi newsletter. Y si te apuntas ahora, te hago llegar también la infografía con <b>10 hábitos para tu bienestar en la industria musical</b>.'
+    ],
+    button: { text: 'Quiero recibir los recursos gratuitos', url: SITE_URL + '#newsletter' },
+    closing: 'Gracias por estar ahí.<br><br>Un abrazo,<br>Marta',
+    footer: 'Te escribo una sola vez porque pediste el kit de emergencia en musicmind.es. No te hemos suscrito a ninguna lista: solo recibirás la newsletter si te apuntas tú con el botón.'
+  });
+}
+
 function emailLayout(o) {
   var ink = '#2F4A55', muted = '#4C6672', accent = '#5E7A87', bg = '#F1EAE1', surface = '#FBF7F1';
   var serif = "Georgia,'Times New Roman',serif", sans = "'Helvetica Neue',Helvetica,Arial,sans-serif";
@@ -527,6 +551,48 @@ function sendContactInvites() {
   });
 }
 
+/* ---------- Seguimiento a quien pidió el kit y no se suscribió ----------
+   Ejecutar a mano desde el editor. Recorre LEADS AUDIO y envía
+   kitFollowUpHtml() una sola vez a quien pidió el kit hace FOLLOWUP_DELAY_DAYS
+   días o más, no marcó la newsletter y no está ya suscrito. Lo apunta en la
+   pestaña SEGUIMIENTO KIT. Se puede volver a ejecutar sin riesgo: solo envía
+   a los que falten. */
+function sendKitFollowUps() {
+  var leads = getSheet(LEADS_SHEET_NAME, ['Fecha', 'Email', 'Audio', 'Origen', 'Consentimiento', 'Texto consentimiento', 'Audios enviados', 'Newsletter']);
+  var log = getSheet(FOLLOWUP_SHEET_NAME, ['Fecha', 'Email', 'Seguimiento enviado', '¿Se ha suscrito?']);
+  var subs = getSheet(SHEET_NAME, NEWS_COLS);
+  var last = leads.getLastRow();
+  if (last < 2) return;
+  var cutoff = new Date(Date.now() - FOLLOWUP_DELAY_DAYS * 24 * 3600 * 1000);
+  var rows = leads.getRange(2, 1, last - 1, 8).getValues();
+  var sent = 0, waiting = 0, skipped = [];
+  rows.forEach(function (r) {
+    var email = String(r[1]).trim().toLowerCase();
+    // Filas antiguas (anteriores a las casillas): G y H vacías = kit enviado, sin newsletter.
+    if (r[2] !== 'kit-emergencia' || r[6] === false || r[7] === true) return;
+    if (!isValidEmail(email) || /@example\.com$/i.test(email)) return;
+    if (emailExists(log, 2, email)) return;
+    if (emailExists(subs, 2, email)) { skipped.push(email + ' (ya suscrito)'); return; }
+    var when = new Date(r[0]);
+    if (isNaN(when.getTime()) || when > cutoff) { waiting++; return; }
+    if (MailApp.getRemainingDailyQuota() < 2) { skipped.push(email + ' (cuota diaria agotada: vuelve a ejecutar mañana)'); return; }
+    sendToSubscriber(email, FOLLOWUP_SUBJECT, kitFollowUpHtml());
+    log.appendRow([new Date(), email]);
+    var cb = log.getRange(log.getLastRow(), 3, 1, 2);
+    cb.insertCheckboxes();
+    cb.setValues([[true, false]]);
+    sent++;
+  });
+  Logger.log('Seguimientos enviados: ' + sent + ' · esperando: ' + waiting + (skipped.length ? '\nSaltados:\n' + skipped.join('\n') : ''));
+  MailApp.sendEmail({
+    to: NOTIFY_EMAIL,
+    subject: '✉ Seguimiento del kit enviado · Music Mind',
+    htmlBody: notifyHtml('Seguimiento a quien pidió el kit', [
+      ['Enviados', String(sent)], ['Aún dentro del plazo', String(waiting)], ['Saltados', skipped.length ? skipped.join('\n') : 'Ninguno']
+    ])
+  });
+}
+
 /* ---------- Previsualizar emails ----------
    Ejecuta esta función desde el editor (▶ Ejecutar) para recibir en
   PREVIEW_TO los tres emails: kit al suscribirse, email de Marta con la
@@ -543,4 +609,10 @@ function previewEmails() {
 function previewInvite() {
   GmailApp.sendEmail(PREVIEW_TO, '[PRUEBA] ' + INVITE_SUBJECT, 'HTML',
     { htmlBody: inviteHtml('Olga'), name: SENDER_NAME, from: SENDER_EMAIL, replyTo: REPLY_TO });
+}
+
+// Solo el seguimiento del kit.
+function previewFollowUp() {
+  GmailApp.sendEmail(PREVIEW_TO, '[PRUEBA] ' + FOLLOWUP_SUBJECT, 'HTML',
+    { htmlBody: kitFollowUpHtml(), name: SENDER_NAME, from: SENDER_EMAIL, replyTo: REPLY_TO });
 }
