@@ -174,14 +174,22 @@ var NEWS_COLS = ['Fecha', 'Email', 'Origen', 'Consentimiento', 'Texto consentimi
 var COL_KIT = 6, COL_WELCOME = 7, COL_KIT_DATE = 8, COL_WELCOME_DATE = 9;
 
 function handleNewsletter(email, source, ts, consentCell) {
+  var alreadyHadKit = SHEET_ID ? hasReceivedKit(email) : false;
   var row = addSubscriber(email, source, ts, consentCell, CONSENT_TEXT_NEWS);
   var isNew = row !== 0;
 
   // Kit (dos audios) al momento, solo la primera vez. El email de Marta con la
   // infografía llega a los WELCOME_DELAY_DAYS días con sendPendingWelcomes().
+  // Si ya lo recibió desde la landing, no se le reenvía: solo la infografía.
+  var kitSent = false;
   if (isNew && KIT_AUDIOS.length) {
-    sendToSubscriber(email, 'Bienvenida a Music Mind · tu kit de emergencia', kitWelcomeHtml());
-    markSent(row, COL_KIT, COL_KIT_DATE);
+    if (alreadyHadKit) {
+      markSent(row, COL_KIT, COL_KIT_DATE);
+    } else {
+      sendToSubscriber(email, 'Bienvenida a Music Mind · tu kit de emergencia', kitWelcomeHtml());
+      markSent(row, COL_KIT, COL_KIT_DATE);
+      kitSent = true;
+    }
   }
 
   MailApp.sendEmail({
@@ -190,10 +198,23 @@ function handleNewsletter(email, source, ts, consentCell) {
     htmlBody: notifyHtml('Nueva alta en la newsletter', [
       ['Email', email], ['Origen', source], ['Fecha', ts.toLocaleString()],
       ['Ya estaba suscrito', isNew ? 'No' : 'Sí (no se le reenvía nada)'],
+      ['Kit', kitSent ? 'Enviado ahora' : (alreadyHadKit ? 'Ya lo había recibido desde la landing (no se reenvía; recibirá la infografía a los ' + WELCOME_DELAY_DAYS + ' días)' : 'No enviado')],
       ['Consentimiento', consentCell + ' — «' + CONSENT_TEXT_NEWS + '»']
     ])
   });
   return json({ result: 'success', message: 'Suscripción registrada.' });
+}
+
+// ¿Ya recibió el kit desde la landing? (pestaña LEADS AUDIO; G vacía en filas
+// antiguas = kit enviado, igual que en sendKitFollowUps).
+function hasReceivedKit(email) {
+  var leads = getSheet(LEADS_SHEET_NAME, ['Fecha', 'Email', 'Audio', 'Origen', 'Consentimiento', 'Texto consentimiento', 'Audios enviados', 'Newsletter']);
+  var last = leads.getLastRow();
+  if (last < 2) return false;
+  var target = String(email).trim().toLowerCase();
+  return leads.getRange(2, 1, last - 1, 8).getValues().some(function (r) {
+    return String(r[1]).trim().toLowerCase() === target && r[2] === 'kit-emergencia' && r[6] !== false;
+  });
 }
 
 // Añade el email a la pestaña de newsletter si no estaba.
